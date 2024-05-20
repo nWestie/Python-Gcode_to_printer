@@ -1,7 +1,8 @@
 import math
-import re
 import pandas as pd
+import time
 
+startTime = time.time()
 # list of values from gcode
 xarray = [0]
 yarray = [0]
@@ -28,15 +29,16 @@ zi = 0
 
 # collect data from gcode file
 gcodefile = open("3DBenchy.gcode", 'r')
-while True:
+while (True):
     myline = gcodefile.readline()
     if ';' in myline:
-        pass
+        pass  # This does nothing??? were they looking for 'continue' ?
     if 'G0' in myline or 'G1' in myline:
         if 'X' in myline:
             search = 'X'
             xindex = myline.rfind(search)
             xvalueindex = xindex + 1
+            # TODO: fix this, won't always be same length /NW
             x = myline[xvalueindex:xvalueindex+7]
             x = float(x)
             xarray.append(x)
@@ -111,6 +113,7 @@ while True:
         tf = float(tf)
         treal.append(tf)
 
+        # Interpolating for every time step of the output
         rows = math.floor(tf/tint)-math.floor(ti/tint)
         for i in range(rows):
             totalint += tint
@@ -119,24 +122,14 @@ while True:
                 p = (totalint-ti)/t
 
                 xn = xi + dx*p
-                xn = "{:.4f}".format(xn)
-                xn = float(xn)
                 xpos.append(xn)
 
                 yn = yi + dy*p
-                yn = "{:.4f}".format(yn)
-                yn = float(yn)
                 ypos.append(yn)
 
-                zn = z
-                zn = "{:.4f}".format(zn)
-                zn = float(zn)
-                zpos.append(zn)
+                zpos.append(z)
 
-                ex = e
-                ex = "{:.4f}".format(ex)
-                ex = float(ex)
-                evalue.append(ex)
+                evalue.append(e)
 
         xi = x
         yi = y
@@ -146,5 +139,9 @@ while True:
         break
 
 dict = {'time': timeint, 'X': xpos, 'Y': ypos, 'Z': zpos, 'Ex': evalue}
+print(f"Execution time: {time.time()-startTime}s")
 df = pd.DataFrame(dict)
-df.to_csv('benchyTrajs.csv')
+df.to_csv('benchyTrajs.csv', float_format="%.4f") #This takes the vast majority of the execution time
+# df.to_csv('benchyTrajs.csv')
+print(f"Execution time: {time.time()-startTime}s")
+
