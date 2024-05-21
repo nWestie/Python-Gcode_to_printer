@@ -4,14 +4,18 @@ from tkinter.filedialog import askopenfilename
 from matplotlib.widgets import Slider
 from typing import Optional
 from plotting import LivePlot3D
+from time import time
 
 GCode_filename = ""
 # GCode_filename = "./gcode/1-Cube.gcode"
-GCode_filename = "./gcode/testing.gcode"
+# GCode_filename = "./gcode/testing.gcode"
 default_folder = "./gcode"
 
-
-lineCoords: np.ndarray = np.zeros((1, 3))
+# time to beat: 70sec
+# With 1000 row chunked allocations: 0.5sec
+# With 5000 row chunked allocations: 0.45sec
+# - Calling this good
+lineCoords: np.ndarray = np.zeros((0, 3))
 
 
 def main() -> int:
@@ -20,14 +24,23 @@ def main() -> int:
     if (not GCode_filename):
         GCode_filename = askopenfilename(initialdir=default_folder)
     printer: Printer = Printer()
+    i: int = 0
+    startTime: float = time()
     with open(GCode_filename, "r") as gcode:
         for line in (l.removesuffix('\n') for l in gcode):
-            # print(line)
             new_state = printer.parse_line(line)
             if (new_state):
-                # print(new_state)
-                lineCoords = np.vstack(
-                    (lineCoords, [new_state.x, new_state.y, new_state.z]))
+                if (i == len(lineCoords)):
+                    lineCoords = np.vstack([lineCoords, np.empty((5000, 3))])
+                lineCoords[i] = np.array(
+                    [new_state.x, new_state.y, new_state.z])
+                i += 1
+    lineCoords = lineCoords[:i]
+    print("time:", time()-startTime)
+    print("Total lines:", i)
+    print("Not implemented:")
+    for k, v in printer.unimplemented_cmds.items():
+        print(f"{k}: {v}")
     LivePlot3D((200, 200, 200), updater)
     return 0
 
@@ -56,14 +69,17 @@ class PrinterPos:
 
 
 class Printer:
-    inch_units: bool = False  # true if in imperial system
-    relative_move: bool = False  # if movements are relative
-    relative_e: bool = False  # if Extrusion is relative
-    # current_pos: PrinterPos
-    current_pos: PrinterPos = PrinterPos(0, 0, 0, 0, 0)
-    # last_pos: PrinterPos = PrinterPos(0, 0, 0, 0, 0)
-    # offsets used to ensure G92 zeroing can be handled.
-    workspace_offsets: dict[str, float] = {'x': 0, 'y': 0, 'z': 0, 'e': 0}
+    def __init__(self) -> None:
+        self.inch_units: bool = False  # true if in imperial system
+        self.relative_move: bool = False  # if movements are relative
+        self.relative_e: bool = False  # if Extrusion is relative
+        # current_pos: PrinterPos
+        self.current_pos: PrinterPos = PrinterPos(0, 0, 0, 0, 0)
+        # last_pos: PrinterPos = PrinterPos(0, 0, 0, 0, 0)
+        # offsets used to ensure G92 zeroing can be handled.
+        self.workspace_offsets: dict[str, float] = {
+            'x': 0, 'y': 0, 'z': 0, 'e': 0}
+        self.unimplemented_cmds: dict[str, int] = {}
 
     def parse_line(self, line: str) -> Optional[PrinterPos]:
         # Remove comments(everything after a semicolon)
@@ -92,21 +108,16 @@ class Printer:
             self.inch_units = True
         elif (cmd == 'G21'):  # Metric(mm)
             self.inch_units = False
-        elif (cmd in ('G4', 'M0', 'M1')):  # Dwell
-            # https://marlinfw.org/docs/gcode/M000-M001.html
-            print("#TODO: Dwell not implemented")
-        elif (cmd == 'G28'):
-            # https://marlinfw.org/docs/gcode/G029-abl-3point.html
-            print("#TODO: Homing not implemented")
         elif (cmd == 'G92'):
             self.updateOffsets(cmds)
-        elif (cmd in ('M104', 'M140', 'M141', 'M190', 'M109', 'M191')):
-            print(f"Temperature control not handled({cmd})")
-        elif (cmd in ('M106', 'M107')):
-            printd(f"Fan control not handled({cmd})")
         else:
-            print(f"{cmd} not currently implemented")
+            count: int = self.unimplemented_cmds.get(cmd, 0) + 1
+            self.unimplemented_cmds[cmd] = count
         return None
+# Temprature commands: 'M104', 'M140', 'M141', 'M190', 'M109', 'M191'
+# Fan commands:        'M106', 'M107'
+# Homing: G28
+# Dwell: 'G4', 'M0', 'M1'
 
     def parse_movement(self, cmds: list[str]) -> None:
         """Called for G0/1. Returns an updated position based on the movements specified"""
@@ -128,6 +139,8 @@ class Printer:
             elif (axis == 'e'):
                 if (self.relative_e):
                     val += self.current_pos.e
+                else:
+                    val += self.workspace_offsets[axis]
                 self.current_pos.e = val
             elif (axis == 'f'):
                 self.current_pos.feedrate = val
@@ -136,7 +149,7 @@ class Printer:
         """G92 Allows specifying the current position in relation to a newly defined coordinate system, offset from the machine coords. The offsets in XYZE for this coodinate space are stored."""
         for cmd in cmds:
             axis = cmd[0].lower()
-            if(axis not in "xyze"):
+            if (axis not in "xyze"):
                 continue
             new_val = float(cmd[1:])
             if (self.inch_units):

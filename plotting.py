@@ -36,7 +36,8 @@ class LivePlot3D:
         self.line = Line3D(data[:, 0], data[:, 1],
                            data[:, 2], c='g', marker='.', linewidth=1)
         ax.add_artist(self.line)
-        animation = FuncAnimation(fig, self.update, frames=50, interval=50)
+        # attempt to animate at 24 fps
+        animation = FuncAnimation(fig, self.update, frames=50, interval=int(1000/24))
 
         plt.show()
 
