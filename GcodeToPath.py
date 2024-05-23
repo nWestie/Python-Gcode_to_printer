@@ -12,7 +12,7 @@ GCode_filename = ""
 # GCode_filename = "./gcode/testing.gcode"
 default_folder = "./gcode"
 alloc_block_size = 5000  # size of block allocation
-timestep = 50  # time between csv frames in ms
+timestep = 100  # time between csv frames in ms
 ######### </CONFIG> #########
 
 # time to beat: 70sec
@@ -29,7 +29,8 @@ def main() -> int:
 
     if (not GCode_filename):
         GCode_filename = askopenfilename(initialdir=default_folder)
-    printer: Printer = Printer()
+    # Default feedrate set to 2000 mm/min for now
+    printer: Printer = Printer(2000)
     startTime: float = time.time()
     with open(GCode_filename, "r") as gcode:
         for line in (l.removesuffix('\n') for l in gcode):
@@ -40,7 +41,7 @@ def main() -> int:
             new_steps[:, 0] += path_steps[act_size-1, 0]+timestep
             # allocate more space if needed
             while (act_size+len(new_steps) > len(path_steps)):
-                path_steps = np.vstack([path_steps, np.empty((5000, 3))])
+                path_steps = np.vstack([path_steps, np.empty((5000, 5))])
             # insert new steps into full list
             new_size = act_size+len(new_steps)
             path_steps[act_size:new_size, :] = new_steps
@@ -49,7 +50,7 @@ def main() -> int:
     # Trim array to actual size
     path_steps = path_steps[:act_size]
     print("time:", time.time()-startTime)
-    # print("Total lines:", i)
+    print("Total lines:", act_size)
     print("Not implemented:")
     for k, v in printer.unimplemented_cmds.items():
         print(f"{k}: {v}")
@@ -59,37 +60,41 @@ def main() -> int:
 
 def updater(frame: int, slider: Slider) -> np.ndarray:
     slider.valmax = len(path_steps)
-    # show a range of
-    return path_steps[slider.val:min(slider.val+100, len(path_steps)), 1:4]
+    # show a range of values
+    return path_steps[slider.val:min(slider.val+500, len(path_steps)), 1:4]
 
 
 def inch_to_mm(val: float) -> float:
     return val*25.4
 
 
-class PrinterPos:
-    # Represents moving to this position with the specified feedrate
-    # All units are absolute mm
-    def __init__(self, pos: np.ndarray = np.array([0., 0., 0.]), e: float = 0., feedrate: float = 0.):
-        self.pos: np.ndarray = pos
-        self.e: float = e  # extrusion
-        self.feedrate: float = feedrate
+# class PrinterPos:
+#     # Represents moving to this position with the specified feedrate
+#     # All units are absolute mm
+#     def __init__(self, pos: np.ndarray = np.array([0., 0., 0.]), e: float = 0., feedrate: float = 0.):
+#         self.pos: np.ndarray = pos
+#         self.e: float = e  # extrusion
+#         self.feedrate: float = feedrate
 
-    def copy(self) -> 'PrinterPos':
-        return PrinterPos(self.pos.copy(), self.e, self.feedrate)
+#     def copy(self) -> 'PrinterPos':
+#         return PrinterPos(self.pos.copy(), self.e, self.feedrate)
 
 
 class Printer:
-    def __init__(self) -> None:
+    def __init__(self, default_feedrate: float) -> None:
         self.inch_units: bool = False  # true if in imperial system
         self.relative_move: bool = False  # if movements are relative
         self.relative_e: bool = False  # if Extrusion is relative
-        self.state: PrinterPos = PrinterPos(np.array((0., 0, 0)), 0, 0)
-        self.last_state: PrinterPos = PrinterPos(np.array((0., 0, 0)), 0, 0)
+        self.feedrate: float = default_feedrate
+        self.state: np.ndarray = np.zeros(4)
+        self.last_state: np.ndarray = np.zeros(4)
         # offsets used to ensure G92 zeroing can be handled.
-        self.workspace_offsets: dict[str, float] = {
-            'x': 0, 'y': 0, 'z': 0, 'e': 0}
+        self.workspace_offsets: np.ndarray = np.zeros(4)
         self.unimplemented_cmds: dict[str, int] = {}
+
+    def get_axis_index(self, axis: str) -> int:
+        """Converts the axis letter to the index needed for state and offsets"""
+        return 'xyze'.index(axis)
 
     def parse_line(self, line: str) -> Optional[np.ndarray]:
         """Parses a single line of Gcode. Relevant state is stored by the Printer object. If the line is a move or delay, returns an array of position commands: [time, x, y, z, e]. Units are ms and mm respectively"""
@@ -129,17 +134,16 @@ class Printer:
 # Temprature commands: 'M104', 'M140', 'M141', 'M190', 'M109', 'M191'
 # Fan commands:        'M106', 'M107'
 # Homing: G28
-# Dwell:
 
     def generate_move_steps(self) -> np.ndarray:
         # feedrate is mm/min -> convert to time
         # dist/feedrate = time
-        travel = self.state.pos - self.last_state.pos
+        travel = self.state[:3] - self.last_state[:3]
         dist = np.linalg.norm(travel)
         # Feedrate in mm/min, so convert from min->millisec
-        if (self.state.feedrate == 0):
+        if (self.feedrate == 0):
             raise ValueError("Feedrate cannot be zero")
-        travel_time = dist/self.state.feedrate*60*1000
+        travel_time = dist/self.feedrate*60*1000
         num_steps = int(np.ceil(travel_time/timestep))
 
         # build array
@@ -147,10 +151,8 @@ class Printer:
         # add range of timesteps
         steps[:, 0] = np.arange(0, timestep*num_steps, timestep)
         # interpolate between the two positions
-        steps[:, 1:4] = np.linspace(
-            self.last_state.pos, self.state.pos, num_steps, endpoint=False)
-        steps[:, 4] = np.linspace(
-            self.last_state.e, self.state.e, num_steps, endpoint=False)
+        steps[:, 1:5] = np.linspace(
+            self.last_state, self.state, num_steps, endpoint=False)
         return steps
 
     def generate_dwell_steps(self, cmds: list[str]) -> np.ndarray:
@@ -164,8 +166,7 @@ class Printer:
                 delay = float(cmd[1:])
         # Build array
         num_steps = int(np.ceil(delay/timestep))
-        pos_arr = np.append(self.state.pos, self.state.e)
-        pos_arr = pos_arr.reshape(1, 4).repeat(num_steps, axis=0)
+        pos_arr = self.state.reshape(1, 4).repeat(num_steps, axis=0)
         times = np.arange(0, timestep*num_steps,
                           timestep).reshape(num_steps, 1)
         return np.hstack([times, pos_arr])
@@ -184,20 +185,20 @@ class Printer:
                 # Offsets only are required in absolute mode, in relative mode,
                 # all commands are offset from the last position,
                 # so the workspace offset doesn't matter
-                i = 'xyz'.index(axis)
+                i = self.get_axis_index(axis)
                 if (self.relative_move):
-                    val += self.state.pos[i]
+                    val += self.state[i]
                 else:
-                    val += self.workspace_offsets[axis]
-                self.state.pos[i] = val
+                    val += self.workspace_offsets[i]
+                self.state[i] = val
             elif (axis == 'e'):
                 if (self.relative_e):
-                    val += self.state.e
+                    val += self.state[3]
                 else:
-                    val += self.workspace_offsets[axis]
-                self.state.e = val
+                    val += self.workspace_offsets[3]
+                self.state[3] = val
             elif (axis == 'f'):
-                self.state.feedrate = val
+                self.feedrate = val
 
     def updateOffsets(self, cmds: list[str]) -> None:
         """G92 Allows specifying the current position in relation to a newly defined coordinate system, offset from the machine coords. The offsets in XYZE for this coodinate space are stored."""
@@ -208,11 +209,11 @@ class Printer:
             new_val = float(cmd[1:])
             if (self.inch_units):
                 new_val = inch_to_mm(new_val)
-            i = 'xyz'.index(axis)
-            curr_pos = self.state.pos[i]
+            i = self.get_axis_index(axis)
+            curr_pos = self.state[i]
             # Setting new offset.
             # new_val is the position the Gcode specifies it should be currently, so the offset is calculated to do this. curr_pos is always in absolute machine coords, in mm.
-            self.workspace_offsets[axis] = curr_pos - new_val
+            self.workspace_offsets[i] = curr_pos - new_val
 
 
 if __name__ == "__main__":

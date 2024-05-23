@@ -4,7 +4,7 @@ from plotting import LivePlot3D
 from matplotlib.widgets import Slider
 
 # pos_arr = np.linspace((1, 2, 4), (1.2, 4.3, 1), 5)
-p = Printer()
+p = Printer(2000)
 pos_arr = np.empty([0, 5])
 # pos_arr = p.parse_line("G1 X10 Y80.52 F5000")
 with open("gcode/testing.gcode", 'r') as f:
