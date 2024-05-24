@@ -5,6 +5,8 @@ G21 ; MM units
 G0 F5000
 ;line
 G1 X10 Y10 E10
+
+G4 S2.5
 G1 X20 E10
 G1 X50 Y50
 ;box

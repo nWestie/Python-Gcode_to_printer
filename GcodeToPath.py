@@ -15,69 +15,67 @@ alloc_block_size = 5000  # size of block allocation
 timestep = 100  # time between csv frames in ms
 ######### </CONFIG> #########
 
-# time to beat: 70sec
-# With 1000 row chunked allocations: 0.5sec
-# With 5000 row chunked allocations: 0.45sec
-# - Calling this good
-# lineCoords: np.ndarray = np.zeros((0, 3))
-path_steps: np.ndarray = np.empty((5000, 5))
-act_size: int = 0  # current size of data in pathSteps
+
+# path_steps: np.ndarray = np.empty((5000, 5))
+# act_size: int = 0  # current size of data in pathSteps
+
+
+class PathArray:
+    def __init__(self):
+        self.steps: np.ndarray = np.zeros((1, 5))
+        self.act_size = 0
+        self._add_space()
+
+    def grow_if_needed(self, size: int):
+        if (self.act_size+size > len(self.steps)):
+            self._add_space()
+
+    def _add_space(self):
+        next_time = self.steps[-1, 0] + timestep
+        self.steps = np.vstack([self.steps, np.empty((alloc_block_size, 5))])
+        self.steps[-alloc_block_size:,
+                   0] = np.arange(next_time, next_time+timestep*alloc_block_size, timestep)
+
+    def trim(self):
+        self.steps = self.steps[:self.act_size]
+
+
+path: PathArray = PathArray()
 
 
 def main() -> int:
-    global GCode_filename, path_steps, act_size
+    global GCode_filename
 
     if (not GCode_filename):
         GCode_filename = askopenfilename(initialdir=default_folder)
+
     # Default feedrate set to 2000 mm/min for now
     printer: Printer = Printer(2000)
+
     startTime: float = time.time()
     with open(GCode_filename, "r") as gcode:
         for line in (l.removesuffix('\n') for l in gcode):
-            new_steps = printer.parse_line(line)
-            if (new_steps is None or len(new_steps) == 0):
-                continue
-            # offset timestamp of new data
-            new_steps[:, 0] += path_steps[act_size-1, 0]+timestep
-            # allocate more space if needed
-            while (act_size+len(new_steps) > len(path_steps)):
-                path_steps = np.vstack([path_steps, np.empty((5000, 5))])
-            # insert new steps into full list
-            new_size = act_size+len(new_steps)
-            path_steps[act_size:new_size, :] = new_steps
-            act_size = new_size
+            printer.parse_line(line)
 
     # Trim array to actual size
-    path_steps = path_steps[:act_size]
+    path.trim()
     print("time:", time.time()-startTime)
-    print("Total lines:", act_size)
+    print("Total lines:", path.act_size)
     print("Not implemented:")
     for k, v in printer.unimplemented_cmds.items():
-        print(f"{k}: {v}")
+        print(f"- {k}: {v}")
     LivePlot3D((200, 200, 200), updater)
     return 0
 
 
 def updater(frame: int, slider: Slider) -> np.ndarray:
-    slider.valmax = len(path_steps)
+    slider.valmax = path.act_size
     # show a range of values
-    return path_steps[slider.val:min(slider.val+500, len(path_steps)), 1:4]
+    return path.steps[slider.val:min(slider.val+500, path.act_size), 1:4]
 
 
 def inch_to_mm(val: float) -> float:
     return val*25.4
-
-
-# class PrinterPos:
-#     # Represents moving to this position with the specified feedrate
-#     # All units are absolute mm
-#     def __init__(self, pos: np.ndarray = np.array([0., 0., 0.]), e: float = 0., feedrate: float = 0.):
-#         self.pos: np.ndarray = pos
-#         self.e: float = e  # extrusion
-#         self.feedrate: float = feedrate
-
-#     def copy(self) -> 'PrinterPos':
-#         return PrinterPos(self.pos.copy(), self.e, self.feedrate)
 
 
 class Printer:
@@ -96,7 +94,7 @@ class Printer:
         """Converts the axis letter to the index needed for state and offsets"""
         return 'xyze'.index(axis)
 
-    def parse_line(self, line: str) -> Optional[np.ndarray]:
+    def parse_line(self, line: str):
         """Parses a single line of Gcode. Relevant state is stored by the Printer object. If the line is a move or delay, returns an array of position commands: [time, x, y, z, e]. Units are ms and mm respectively"""
         # Remove comments(everything after a semicolon)
         line = line.split(";")[0]
@@ -105,12 +103,15 @@ class Printer:
 
         cmds = [x for x in line.split(' ') if len(x)]
         cmd = cmds[0].upper()
+
         if (cmd in ('G0', 'G1')):  # Basic movement
             self.last_state = self.state.copy()
             self.parse_movement(cmds)
-            return self.generate_move_steps()
+            self.generate_move_steps()
+            return
         elif (cmd in ('G4', 'M0', 'M1')):
             return self.generate_dwell_steps(cmds)
+
         elif (cmd == 'G90'):  # Absolute Movement
             self.relative_move = False
             self.relative_e = False
@@ -135,7 +136,7 @@ class Printer:
 # Fan commands:        'M106', 'M107'
 # Homing: G28
 
-    def generate_move_steps(self) -> np.ndarray:
+    def generate_move_steps(self):
         # feedrate is mm/min -> convert to time
         # dist/feedrate = time
         travel = self.state[:3] - self.last_state[:3]
@@ -147,15 +148,14 @@ class Printer:
         num_steps = int(np.ceil(travel_time/timestep))
 
         # build array
-        steps = np.empty((num_steps, 5))
-        # add range of timesteps
-        steps[:, 0] = np.arange(0, timestep*num_steps, timestep)
         # interpolate between the two positions
-        steps[:, 1:5] = np.linspace(
+        path.grow_if_needed(num_steps)
+        new_size = path.act_size+num_steps
+        path.steps[path.act_size:new_size, 1:] = np.linspace(
             self.last_state, self.state, num_steps, endpoint=False)
-        return steps
+        path.act_size = new_size
 
-    def generate_dwell_steps(self, cmds: list[str]) -> np.ndarray:
+    def generate_dwell_steps(self, cmds: list[str]):
         delay: float = 0.0  # in milliseconds
         for cmd in cmds:
             # S command takes precedence, if both are specified
@@ -164,12 +164,13 @@ class Printer:
                 break
             if (cmd[0].lower() == 'p' and delay == 0.0):
                 delay = float(cmd[1:])
+
         # Build array
         num_steps = int(np.ceil(delay/timestep))
-        pos_arr = self.state.reshape(1, 4).repeat(num_steps, axis=0)
-        times = np.arange(0, timestep*num_steps,
-                          timestep).reshape(num_steps, 1)
-        return np.hstack([times, pos_arr])
+        new_size = path.act_size+num_steps
+        path.steps[path.act_size:new_size, 1:] = self.state.reshape(
+            1, 4).repeat(num_steps, axis=0)
+        path.act_size = new_size
 
     def parse_movement(self, cmds: list[str]) -> None:
         """Called for G0/1. Updates self.current_pos based on the movements specified in the Gcode line"""
