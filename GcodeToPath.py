@@ -22,22 +22,28 @@ timestep = 100  # time between csv frames in ms
 
 class PathArray:
     def __init__(self):
-        self.steps: np.ndarray = np.zeros((1, 5))
-        self.act_size = 0
+        self._steps: np.ndarray = np.zeros((1, 5))
+        self._act_size = 0
         self._add_space()
 
-    def grow_if_needed(self, size: int):
-        if (self.act_size+size > len(self.steps)):
+    def append(self, new_steps: np.ndarray):
+        if (self._act_size+len(new_steps) > len(self._steps)):
             self._add_space()
+        new_size = self._act_size+len(new_steps)
+        path._steps[self._act_size:new_size, 1:] = new_steps
+        self._act_size = new_size
+
+    def get(self):
+        return self._steps[:self._act_size]
 
     def _add_space(self):
-        next_time = self.steps[-1, 0] + timestep
-        self.steps = np.vstack([self.steps, np.empty((alloc_block_size, 5))])
-        self.steps[-alloc_block_size:,
-                   0] = np.arange(next_time, next_time+timestep*alloc_block_size, timestep)
+        next_time = self._steps[-1, 0] + timestep
+        self._steps = np.vstack([self._steps, np.empty((alloc_block_size, 5))])
+        self._steps[-alloc_block_size:,
+                    0] = np.arange(next_time, next_time+timestep*alloc_block_size, timestep)
 
     def trim(self):
-        self.steps = self.steps[:self.act_size]
+        self._steps = self._steps[:self._act_size]
 
 
 path: PathArray = PathArray()
@@ -60,7 +66,7 @@ def main() -> int:
     # Trim array to actual size
     path.trim()
     print("time:", time.time()-startTime)
-    print("Total lines:", path.act_size)
+    print("Total lines:", path._act_size)
     print("Not implemented:")
     for k, v in printer.unimplemented_cmds.items():
         print(f"- {k}: {v}")
@@ -69,9 +75,9 @@ def main() -> int:
 
 
 def updater(frame: int, slider: Slider) -> np.ndarray:
-    slider.valmax = path.act_size
+    slider.valmax = path._act_size
     # show a range of values
-    return path.steps[slider.val:min(slider.val+500, path.act_size), 1:4]
+    return path.get()[slider.val:min(slider.val+500, path._act_size), 1:4]
 
 
 def inch_to_mm(val: float) -> float:
@@ -149,11 +155,8 @@ class Printer:
 
         # build array
         # interpolate between the two positions
-        path.grow_if_needed(num_steps)
-        new_size = path.act_size+num_steps
-        path.steps[path.act_size:new_size, 1:] = np.linspace(
-            self.last_state, self.state, num_steps, endpoint=False)
-        path.act_size = new_size
+        path.append(np.linspace(
+            self.last_state, self.state, num_steps, endpoint=False))
 
     def generate_dwell_steps(self, cmds: list[str]):
         delay: float = 0.0  # in milliseconds
@@ -167,10 +170,7 @@ class Printer:
 
         # Build array
         num_steps = int(np.ceil(delay/timestep))
-        new_size = path.act_size+num_steps
-        path.steps[path.act_size:new_size, 1:] = self.state.reshape(
-            1, 4).repeat(num_steps, axis=0)
-        path.act_size = new_size
+        path.append(self.state.reshape(1, 4).repeat(num_steps, axis=0))
 
     def parse_movement(self, cmds: list[str]) -> None:
         """Called for G0/1. Updates self.current_pos based on the movements specified in the Gcode line"""
