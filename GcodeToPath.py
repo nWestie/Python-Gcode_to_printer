@@ -1,3 +1,4 @@
+from datetime import datetime
 import numpy as np
 from dataclasses import dataclass
 from tkinter.filedialog import askopenfilename
@@ -5,19 +6,16 @@ from matplotlib.widgets import Slider
 from typing import Optional
 from plotting import LivePlot3D
 import time
+import os
 
 ######### <CONFIG> #########
-GCode_filename = ""
-# GCode_filename = "./gcode/1-Cube.gcode"
+GCode_filename = "./gcode/1-Cube.gcode"
 # GCode_filename = "./gcode/testing.gcode"
+feedrate_override = 10000  # in mm/s
 default_folder = "./gcode"
 alloc_block_size = 5000  # size of block allocation
-timestep = 100  # time between csv frames in ms
+timestep = 10  # time between csv frames in ms
 ######### </CONFIG> #########
-
-
-# path_steps: np.ndarray = np.empty((5000, 5))
-# act_size: int = 0  # current size of data in pathSteps
 
 
 class PathArray:
@@ -52,7 +50,7 @@ path: PathArray = PathArray()
 def main() -> int:
     global GCode_filename
 
-    if (not GCode_filename):
+    if ('GCode_filename' not in globals() or len(GCode_filename) == 0):
         GCode_filename = askopenfilename(initialdir=default_folder)
 
     # Default feedrate set to 2000 mm/min for now
@@ -71,6 +69,17 @@ def main() -> int:
     for k, v in printer.unimplemented_cmds.items():
         print(f"- {k}: {v}")
     LivePlot3D((200, 200, 200), updater)
+
+    # Write file
+    startTime = time.time()
+    timestamp = datetime.now().strftime(' D%y-%m-%d T%H-%M-%S')
+    out_filename = os.path.basename(GCode_filename)
+    out_filename = "./output/" + \
+        os.path.splitext(out_filename)[0] + timestamp + ".csv"
+    np.savetxt(out_filename, path.get(), delimiter=",",
+               fmt='%.3f', header="time(ms), x, y, z, e(mm)")
+    print("save time:", time.time()-startTime)
+
     return 0
 
 
@@ -148,9 +157,13 @@ class Printer:
         travel = self.state[:3] - self.last_state[:3]
         dist = np.linalg.norm(travel)
         # Feedrate in mm/min, so convert from min->millisec
-        if (self.feedrate == 0):
-            raise ValueError("Feedrate cannot be zero")
-        travel_time = dist/self.feedrate*60*1000
+        if ('feedrate_override' in globals()):
+            feed = feedrate_override
+        else:
+            if (self.feedrate == 0):
+                raise ValueError("Feedrate cannot be zero")
+            feed = self.feedrate
+        travel_time = dist/feed*60*1000
         num_steps = int(np.ceil(travel_time/timestep))
 
         # build array
