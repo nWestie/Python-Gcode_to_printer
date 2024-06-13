@@ -1,7 +1,7 @@
 from datetime import datetime
 import numpy as np
 from dataclasses import dataclass
-from tkinter.filedialog import askopenfilename
+from tkinter.filedialog import askopenfilenames
 from matplotlib.widgets import Slider
 from typing import Optional
 from plotting import LivePlot3D
@@ -9,12 +9,13 @@ import time
 import os
 
 ######### <CONFIG> #########
-GCode_filename = "./gcode/1-Cube.gcode"
+# GCode_filenames = ["../gcode/one-layer-E.gcode",]
 # GCode_filename = "./gcode/testing.gcode"
-feedrate_override = 10000  # in mm/s
-default_folder = "./gcode"
+output_folder = "../pathCSVs/"
+feedrate_override = 10000  # in mm/min
+default_folder = "../gcode"
 alloc_block_size = 5000  # size of block allocation
-timestep = 10  # time between csv frames in ms
+timestep = 1  # time between csv frames in ms
 ######### </CONFIG> #########
 
 
@@ -28,8 +29,11 @@ class PathArray:
         if (self._act_size+len(new_steps) > len(self._steps)):
             self._add_space()
         new_size = self._act_size+len(new_steps)
-        path._steps[self._act_size:new_size, 1:] = new_steps
+        self._steps[self._act_size:new_size, 1:] = new_steps
         self._act_size = new_size
+
+    def size(self):
+        return self._act_size
 
     def get(self):
         return self._steps[:self._act_size]
@@ -44,63 +48,69 @@ class PathArray:
         self._steps = self._steps[:self._act_size]
 
 
-path: PathArray = PathArray()
+plottedPath: PathArray = PathArray()
 
 
 def main() -> int:
-    global GCode_filename
+    global GCode_filename, plottedPath
 
-    if ('GCode_filename' not in globals() or len(GCode_filename) == 0):
-        GCode_filename = askopenfilename(initialdir=default_folder)
+    if ('GCode_filenames' not in globals() or len(GCode_filenames) == 0):
+        GCode_filenames = askopenfilenames(initialdir=default_folder)
 
-    # Default feedrate set to 2000 mm/min for now
-    printer: Printer = Printer(2000)
+    for file_name in GCode_filenames:
+        # Default feedrate set to 2000 mm/min for now
+        print()
+        print(file_name)
+        printer: GCode_parser = GCode_parser(2000)
+        startTime: float = time.time()
+        path = printer.parse_file(file_name)
+        print("Parse time:", time.time()-startTime)
+        print("Total lines:", path._act_size)
 
-    startTime: float = time.time()
-    with open(GCode_filename, "r") as gcode:
-        for line in (l.removesuffix('\n') for l in gcode):
-            printer.parse_line(line)
+        # print("Not implemented:")
+        # for k, v in printer.unimplemented_cmds.items():
+        #     print(f"- {k}: {v}")
 
-    # Trim array to actual size
-    path.trim()
-    print("time:", time.time()-startTime)
-    print("Total lines:", path._act_size)
-    print("Not implemented:")
-    for k, v in printer.unimplemented_cmds.items():
-        print(f"- {k}: {v}")
-    LivePlot3D((200, 200, 200), updater)
+        # Visualizing
+        plottedPath = path
+        LivePlot3D((200, 200, 200), updater)
 
-    # Write file
-    startTime = time.time()
-    timestamp = datetime.now().strftime(' D%y-%m-%d T%H-%M-%S')
-    out_filename = os.path.basename(GCode_filename)
-    out_filename = "./output/" + \
-        os.path.splitext(out_filename)[0] + timestamp + ".csv"
-    np.savetxt(out_filename, path.get(), delimiter=",",
-               fmt='%.3f', header="time(ms), x, y, z, e(mm)")
-    print("save time:", time.time()-startTime)
+        # Write file
+        startTime = time.time()
+        timestamp = datetime.now().strftime(' D%y-%m-%d T%H-%M-%S')
+        out_filename = os.path.basename(file_name)
+        out_filename = output_folder + \
+            os.path.splitext(out_filename)[0] + ".csv"
+
+        np.savetxt(out_filename, path.get(), delimiter=",",
+                   fmt='%.3f', header="time(ms), x, y, z, e(mm)")
+        print(f"saved to {out_filename}")
+        print("save time:", time.time()-startTime)
 
     return 0
-
-
-def updater(frame: int, slider: Slider) -> np.ndarray:
-    slider.valmax = path._act_size
-    # show a range of values
-    return path.get()[slider.val:min(slider.val+500, path._act_size), 1:4]
 
 
 def inch_to_mm(val: float) -> float:
     return val*25.4
 
 
-class Printer:
+def updater(frame: int, slider: Slider) -> np.ndarray:
+    slider.valmax = plottedPath.size()
+    # show a range of values
+    return plottedPath.get()[slider.val:min(slider.val+500, plottedPath._act_size), 1:4]
+
+
+class GCode_parser:
     def __init__(self, default_feedrate: float) -> None:
-        self.inch_units: bool = False  # true if in imperial system
-        self.relative_move: bool = False  # if movements are relative
-        self.relative_e: bool = False  # if Extrusion is relative
-        self.feedrate: float = default_feedrate
-        self.state: np.ndarray = np.zeros(4)
-        self.last_state: np.ndarray = np.zeros(4)
+        # Public path
+        self.path: PathArray = PathArray()
+
+        self._inch_units: bool = False  # true if in imperial system
+        self._relative_move: bool = False  # if movements are relative
+        self._relative_e: bool = False  # if Extrusion is relative
+        self._feedrate: float = default_feedrate
+        self._state: np.ndarray = np.zeros(4)
+        self._last_state: np.ndarray = np.zeros(4)
         # offsets used to ensure G92 zeroing can be handled.
         self.workspace_offsets: np.ndarray = np.zeros(4)
         self.unimplemented_cmds: dict[str, int] = {}
@@ -109,7 +119,15 @@ class Printer:
         """Converts the axis letter to the index needed for state and offsets"""
         return 'xyze'.index(axis)
 
-    def parse_line(self, line: str):
+    def parse_file(self, filename: str) -> PathArray:
+        with open(filename, "r") as gcode:
+            for line in (l.removesuffix('\n') for l in gcode):
+                self._parse_line(line)
+        # Trim array to actual size
+        self.path.trim()
+        return self.path
+
+    def _parse_line(self, line: str):
         """Parses a single line of Gcode. Relevant state is stored by the Printer object. If the line is a move or delay, returns an array of position commands: [time, x, y, z, e]. Units are ms and mm respectively"""
         # Remove comments(everything after a semicolon)
         line = line.split(";")[0]
@@ -120,27 +138,27 @@ class Printer:
         cmd = cmds[0].upper()
 
         if (cmd in ('G0', 'G1')):  # Basic movement
-            self.last_state = self.state.copy()
-            self.parse_movement(cmds)
-            self.generate_move_steps()
+            self._last_state = self._state.copy()
+            self._parse_movement(cmds)
+            self._generate_move_steps()
             return
         elif (cmd in ('G4', 'M0', 'M1')):
-            return self.generate_dwell_steps(cmds)
+            return self._generate_dwell_steps(cmds)
 
         elif (cmd == 'G90'):  # Absolute Movement
-            self.relative_move = False
-            self.relative_e = False
+            self._relative_move = False
+            self._relative_e = False
         elif (cmd == 'G91'):  # Relative Movement
-            self.relative_move = True
-            self.relative_e = True
+            self._relative_move = True
+            self._relative_e = True
         elif (cmd == 'M82'):  # Extruder Absolute
-            self.relative_e = False
+            self._relative_e = False
         elif (cmd == 'M83'):  # Extruder Relative
-            self.relative_e = True
+            self._relative_e = True
         elif (cmd == 'G20'):  # Imperial
-            self.inch_units = True
+            self._inch_units = True
         elif (cmd == 'G21'):  # Metric(mm)
-            self.inch_units = False
+            self._inch_units = False
         elif (cmd == 'G92'):
             self.updateOffsets(cmds)
         else:
@@ -151,27 +169,27 @@ class Printer:
 # Fan commands:        'M106', 'M107'
 # Homing: G28
 
-    def generate_move_steps(self):
-        # feedrate is mm/min -> convert to time
+    def _generate_move_steps(self):
         # dist/feedrate = time
-        travel = self.state[:3] - self.last_state[:3]
+        travel = self._state[:3] - self._last_state[:3]
         dist = np.linalg.norm(travel)
         # Feedrate in mm/min, so convert from min->millisec
         if ('feedrate_override' in globals()):
             feed = feedrate_override
         else:
-            if (self.feedrate == 0):
+            if (self._feedrate == 0):
                 raise ValueError("Feedrate cannot be zero")
-            feed = self.feedrate
-        travel_time = dist/feed*60*1000
+            feed = self._feedrate
+        # feedrate is mm/min -> convert to time in ms
+        travel_time = dist/feed*60*1000  
         num_steps = int(np.ceil(travel_time/timestep))
 
         # build array
         # interpolate between the two positions
-        path.append(np.linspace(
-            self.last_state, self.state, num_steps, endpoint=False))
+        self.path.append(np.linspace(
+            self._last_state, self._state, num_steps, endpoint=False))
 
-    def generate_dwell_steps(self, cmds: list[str]):
+    def _generate_dwell_steps(self, cmds: list[str]):
         delay: float = 0.0  # in milliseconds
         for cmd in cmds:
             # S command takes precedence, if both are specified
@@ -183,16 +201,16 @@ class Printer:
 
         # Build array
         num_steps = int(np.ceil(delay/timestep))
-        path.append(self.state.reshape(1, 4).repeat(num_steps, axis=0))
+        self.path.append(self._state.reshape(1, 4).repeat(num_steps, axis=0))
 
-    def parse_movement(self, cmds: list[str]) -> None:
+    def _parse_movement(self, cmds: list[str]) -> None:
         """Called for G0/1. Updates self.current_pos based on the movements specified in the Gcode line"""
         for cmd in cmds:
             # Split command to letter/number
             axis = cmd[0].lower()
             val = float(cmd[1:])
             # handle imperial units
-            if (self.inch_units):
+            if (self._inch_units):
                 val = inch_to_mm(val)
 
             if (axis in 'xyz'):
@@ -200,19 +218,19 @@ class Printer:
                 # all commands are offset from the last position,
                 # so the workspace offset doesn't matter
                 i = self.get_axis_index(axis)
-                if (self.relative_move):
-                    val += self.state[i]
+                if (self._relative_move):
+                    val += self._state[i]
                 else:
                     val += self.workspace_offsets[i]
-                self.state[i] = val
+                self._state[i] = val
             elif (axis == 'e'):
-                if (self.relative_e):
-                    val += self.state[3]
+                if (self._relative_e):
+                    val += self._state[3]
                 else:
                     val += self.workspace_offsets[3]
-                self.state[3] = val
+                self._state[3] = val
             elif (axis == 'f'):
-                self.feedrate = val
+                self._feedrate = val
 
     def updateOffsets(self, cmds: list[str]) -> None:
         """G92 Allows specifying the current position in relation to a newly defined coordinate system, offset from the machine coords. The offsets in XYZE for this coodinate space are stored."""
@@ -221,10 +239,10 @@ class Printer:
             if (axis not in "xyze"):
                 continue
             new_val = float(cmd[1:])
-            if (self.inch_units):
+            if (self._inch_units):
                 new_val = inch_to_mm(new_val)
             i = self.get_axis_index(axis)
-            curr_pos = self.state[i]
+            curr_pos = self._state[i]
             # Setting new offset.
             # new_val is the position the Gcode specifies it should be currently, so the offset is calculated to do this. curr_pos is always in absolute machine coords, in mm.
             self.workspace_offsets[i] = curr_pos - new_val
