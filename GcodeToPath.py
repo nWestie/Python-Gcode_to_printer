@@ -1,8 +1,10 @@
 from datetime import datetime
+import math
 import numpy as np
 from dataclasses import dataclass
 from tkinter.filedialog import askopenfilenames
 from matplotlib.widgets import Slider
+from functools import partial
 from typing import Optional
 from plotting import LivePlot3D
 import time
@@ -12,10 +14,11 @@ import os
 # GCode_filenames = ["../gcode/one-layer-E.gcode",]
 # GCode_filename = "./gcode/testing.gcode"
 output_folder = "../pathCSVs/"
-feedrate_override = 10000  # in mm/min
+feedrate_override = 150  # in mm/s
 default_folder = "../gcode"
+show_plot = False
 alloc_block_size = 5000  # size of block allocation
-timestep = 1  # time between csv frames in ms
+timestep: float = 1.0  # time between csv frames in ms
 ######### </CONFIG> #########
 
 
@@ -48,11 +51,14 @@ class PathArray:
         self._steps = self._steps[:self._act_size]
 
 
-plottedPath: PathArray = PathArray()
+def updater(frame: int, slider: Slider, pathArr: PathArray) -> np.ndarray:
+    slider.valmax = pathArr.size()
+    # show a range of values
+    return pathArr.get()[slider.val:min(slider.val+500, pathArr.size()), 1:4]
 
 
 def main() -> int:
-    global GCode_filename, plottedPath
+    global plottedPath
 
     if ('GCode_filenames' not in globals() or len(GCode_filenames) == 0):
         GCode_filenames = askopenfilenames(initialdir=default_folder)
@@ -72,19 +78,35 @@ def main() -> int:
         #     print(f"- {k}: {v}")
 
         # Visualizing
-        plottedPath = path
-        LivePlot3D((200, 200, 200), updater)
+        if (show_plot):
+            LivePlot3D((200, 200, 200), partial(updater, pathArr=path))
 
         # Write file
         startTime = time.time()
-        timestamp = datetime.now().strftime(' D%y-%m-%d T%H-%M-%S')
+        timestamp = datetime.now().strftime('Date %y-%m-%d Time %H:%M:%S')
         out_filename = os.path.basename(file_name)
         out_filename = output_folder + \
-            os.path.splitext(out_filename)[0] + ".csv"
+            os.path.splitext(out_filename)[0] + f"-{feedrate_override}"
 
-        np.savetxt(out_filename, path.get(), delimiter=",",
+        np.savetxt(out_filename+".csv", path.get(), delimiter=",",
                    fmt='%.3f', header="time(ms), x, y, z, e(mm)")
-        print(f"saved to {out_filename}")
+        
+        size_str = size_as_str(os.path.getsize(out_filename+".csv"))
+        print(f"saved to {out_filename}.csv")
+
+        # Create sidecar file with additional data
+        with open(out_filename+".txt", 'w') as sidecar:
+            sidecar.write(f"Main File: {out_filename}.csv\n")
+            sidecar.write(f"Main File Size: {size_str}")
+            sidecar.write(f"Created: {timestamp}\n")
+            sidecar.write(f"Feedrate: {feedrate_override} mm/s\n")
+            sidecar.write(f"        - {feedrate_override*60} mm/min\n")
+            sidecar.write(f"Total path points: {path.size()}\n")
+            sidecar.write(f"Timestep: {timestep}ms\n")
+            sidecar.write(f"Total Time: {timestep*path.size()/1000}s")
+        print(f"saved to {out_filename}.txt")
+        print(f"Size:{size_str}")
+
         print("save time:", time.time()-startTime)
 
     return 0
@@ -92,12 +114,6 @@ def main() -> int:
 
 def inch_to_mm(val: float) -> float:
     return val*25.4
-
-
-def updater(frame: int, slider: Slider) -> np.ndarray:
-    slider.valmax = plottedPath.size()
-    # show a range of values
-    return plottedPath.get()[slider.val:min(slider.val+500, plottedPath._act_size), 1:4]
 
 
 class GCode_parser:
@@ -174,14 +190,14 @@ class GCode_parser:
         travel = self._state[:3] - self._last_state[:3]
         dist = np.linalg.norm(travel)
         # Feedrate in mm/min, so convert from min->millisec
-        if ('feedrate_override' in globals()):
-            feed = feedrate_override
-        else:
-            if (self._feedrate == 0):
-                raise ValueError("Feedrate cannot be zero")
-            feed = self._feedrate
+        # if ('feedrate_override' in globals()):
+        feed = feedrate_override
+        # else:
+        #     if (self._feedrate == 0):
+        #         raise ValueError("Feedrate cannot be zero")
+        #     feed = self._feedrate/60
         # feedrate is mm/min -> convert to time in ms
-        travel_time = dist/feed*60*1000  
+        travel_time = dist/feed*1000
         num_steps = int(np.ceil(travel_time/timestep))
 
         # build array
@@ -246,6 +262,25 @@ class GCode_parser:
             # Setting new offset.
             # new_val is the position the Gcode specifies it should be currently, so the offset is calculated to do this. curr_pos is always in absolute machine coords, in mm.
             self.workspace_offsets[i] = curr_pos - new_val
+
+
+def size_as_str(size_bytes: int) -> str:
+    """
+    Convert the file size from bytes to a human-readable format.
+
+    Parameters:
+    size_bytes (int): Size of the file in bytes.
+
+    Returns:
+    str: Human-readable file size.
+    """
+    if size_bytes == 0:
+        return "0B"
+    size_name = ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB")
+    i = int(math.floor(math.log(size_bytes, 1024)))
+    p = math.pow(1024, i)
+    s = round(size_bytes / p, 2)
+    return f"{s} {size_name[i]}"
 
 
 if __name__ == "__main__":
