@@ -37,7 +37,8 @@ class LivePlot3D:
                            data[:, 2], c='g', marker='.', linewidth=1)
         ax.add_artist(self.line)
         # attempt to animate at 24 fps
-        animation = FuncAnimation(fig, self.update, frames=50, interval=int(1000/24))
+        animation = FuncAnimation(
+            fig, self.update, frames=50, interval=int(1000/24))
 
         plt.show()
 
@@ -45,7 +46,7 @@ class LivePlot3D:
         self.slider_ax.set_ylim(self.slider.valmin, self.slider.valmax)
         data = self._data_source(frame, self.slider)
         self.line.set_data_3d(data.T)
-        return self.line,
+        return (self.line,)
 
 
 def updateData(frame: int, slider: Slider):

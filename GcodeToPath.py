@@ -1,5 +1,6 @@
 from datetime import datetime
 import math
+import sys
 import numpy as np
 from dataclasses import dataclass
 from tkinter.filedialog import askopenfilenames
@@ -14,9 +15,9 @@ import os
 # GCode_filenames = ["../gcode/one-layer-E.gcode",]
 # GCode_filename = "./gcode/testing.gcode"
 output_folder = "../pathCSVs/"
-feedrate_override = 150  # in mm/s
+feedrate_override = 550  # in mm/s
 default_folder = "../gcode"
-show_plot = False
+show_plot = True
 alloc_block_size = 5000  # size of block allocation
 timestep: float = 1.0  # time between csv frames in ms
 ######### </CONFIG> #########
@@ -58,11 +59,21 @@ def updater(frame: int, slider: Slider, pathArr: PathArray) -> np.ndarray:
 
 
 def main() -> int:
-    global plottedPath
+    global plottedPath, feedrate_override
+    
+    # make sure the script folder is the working dir
+    os.chdir(os.path.dirname(__file__))
+    # check if filename provided as arg
+    Prusa_output_name_override = None
+    if(len(sys.argv)>1):
+        GCode_filenames = sys.argv[1],
+        # overwrite feedrate from PrusaSlicer if it exists
+        feedrate_override = int(os.environ.get("SLIC3R_PERIMETER_SPEED") or feedrate_override)
+        Prusa_output_name_override = os.environ.get("SLIC3R_PP_OUTPUT_NAME")
 
-    if ('GCode_filenames' not in globals() or len(GCode_filenames) == 0):
+    elif ('GCode_filenames' not in globals() or len(GCode_filenames) == 0):
         GCode_filenames = askopenfilenames(initialdir=default_folder)
-
+        
     for file_name in GCode_filenames:
         # Default feedrate set to 2000 mm/min for now
         print()
@@ -84,6 +95,11 @@ def main() -> int:
         # Write file
         startTime = time.time()
         timestamp = datetime.now().strftime('Date %y-%m-%d Time %H:%M:%S')
+        
+        # If triggered from PrusaSlicer, override temp filename with the destination filename
+        if(Prusa_output_name_override):
+            file_name = Prusa_output_name_override
+            print(Prusa_output_name_override)
         out_filename = os.path.basename(file_name)
         out_filename = output_folder + \
             os.path.splitext(out_filename)[0] + f"-{feedrate_override}"
@@ -97,14 +113,14 @@ def main() -> int:
         # Create sidecar file with additional data
         with open(out_filename+".txt", 'w') as sidecar:
             sidecar.write(f"Main File: {out_filename}.csv\n")
-            sidecar.write(f"Main File Size: {size_str}")
+            sidecar.write(f"Main File Size: {size_str}\n")
             sidecar.write(f"Created: {timestamp}\n")
             sidecar.write(f"Feedrate: {feedrate_override} mm/s\n")
             sidecar.write(f"        - {feedrate_override*60} mm/min\n")
             sidecar.write(f"Total path points: {path.size()}\n")
             sidecar.write(f"Timestep: {timestep}ms\n")
             sidecar.write(f"Total Time: {timestep*path.size()/1000}s")
-        print(f"saved to {out_filename}.txt")
+        print(f"saved to {os.path.abspath(out_filename)}.txt")
         print(f"Size:{size_str}")
 
         print("save time:", time.time()-startTime)
@@ -190,13 +206,7 @@ class GCode_parser:
         travel = self._state[:3] - self._last_state[:3]
         dist = np.linalg.norm(travel)
         # Feedrate in mm/min, so convert from min->millisec
-        # if ('feedrate_override' in globals()):
         feed = feedrate_override
-        # else:
-        #     if (self._feedrate == 0):
-        #         raise ValueError("Feedrate cannot be zero")
-        #     feed = self._feedrate/60
-        # feedrate is mm/min -> convert to time in ms
         travel_time = dist/feed*1000
         num_steps = int(np.ceil(travel_time/timestep))
 
