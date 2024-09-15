@@ -1,19 +1,15 @@
+import math
 import os
 import sys
+import numpy as np
 from tkinter.filedialog import askopenfile
+from matplotlib import pyplot as plt
+
+v = np.array([1, 2, 3, 4, 5, 6])
+print(np.reshape(v, [v.size, 1]))
 
 
-host_folder = os.path.dirname(os.path.abspath(sys.argv[0]))
-with open(host_folder+"/touched it.txt", 'w') as file:
-    file.write("HIIIII\n")
-    for arg in sys.argv:
-        file.write(f"{arg}\n")
-    file.write("END ARGS\nENV VARS:\n")
-    for key, value in os.environ.items():
-        file.write(f"{key}: {value}\n")
-
-
-
+# Apply the convolution with 'full' mode (zero-padding at the edges)
 
 
 # pos_arr = np.linspace((1, 2, 4), (1.2, 4.3, 1), 5)

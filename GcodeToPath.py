@@ -59,22 +59,25 @@ def updater(frame: int, slider: Slider, pathArr: PathArray) -> np.ndarray:
 
 
 def main() -> int:
-    global plottedPath, feedrate_override
-    
+    global plottedPath, feedrate_override, GCode_filenames
+
     # make sure the script folder is the working dir
     os.chdir(os.path.dirname(__file__))
     # check if filename provided as arg
     Prusa_output_name_override = None
-    if(len(sys.argv)>1):
+    if (len(sys.argv) > 1):
         GCode_filenames = sys.argv[1],
         # overwrite feedrate from PrusaSlicer if it exists
-        feedrate_override = int(os.environ.get("SLIC3R_PERIMETER_SPEED") or feedrate_override)
+        feedrate_override = int(os.environ.get(
+            "SLIC3R_PERIMETER_SPEED") or feedrate_override)
         Prusa_output_name_override = os.environ.get("SLIC3R_PP_OUTPUT_NAME")
 
     elif ('GCode_filenames' not in globals() or len(GCode_filenames) == 0):
         GCode_filenames = askopenfilenames(initialdir=default_folder)
-        
+
     for file_name in GCode_filenames:
+        # Generate paths
+
         # Default feedrate set to 2000 mm/min for now
         print()
         print(file_name)
@@ -82,22 +85,22 @@ def main() -> int:
         startTime: float = time.time()
         path = printer.parse_file(file_name)
         print("Parse time:", time.time()-startTime)
-        print("Total lines:", path._act_size)
+        print("Total lines:", np.size(path.size()))
 
         # print("Not implemented:")
         # for k, v in printer.unimplemented_cmds.items():
         #     print(f"- {k}: {v}")
 
-        # Visualizing
+    # Visualizing
         if (show_plot):
             LivePlot3D((200, 200, 200), partial(updater, pathArr=path))
 
-        # Write file
+    # Write file:
         startTime = time.time()
         timestamp = datetime.now().strftime('Date %y-%m-%d Time %H:%M:%S')
-        
+
         # If triggered from PrusaSlicer, override temp filename with the destination filename
-        if(Prusa_output_name_override):
+        if (Prusa_output_name_override):
             file_name = Prusa_output_name_override
             print(Prusa_output_name_override)
         out_filename = os.path.basename(file_name)
@@ -110,7 +113,7 @@ def main() -> int:
         size_str = size_as_str(os.path.getsize(out_filename+".csv"))
         print(f"saved to {out_filename}.csv")
 
-        # Create sidecar file with additional data
+    # Create sidecar file with additional data
         with open(out_filename+".txt", 'w') as sidecar:
             sidecar.write(f"Main File: {out_filename}.csv\n")
             sidecar.write(f"Main File Size: {size_str}\n")
