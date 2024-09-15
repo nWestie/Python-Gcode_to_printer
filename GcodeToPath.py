@@ -15,15 +15,18 @@ import os
 # GCode_filenames = ["../gcode/one-layer-E.gcode",]
 # GCode_filename = "./gcode/testing.gcode"
 output_folder = "../pathCSVs/"
-feedrate_override = 550  # in mm/s
+feedrate_override = 300  # in mm/s
+cutoff_freq = 10  # In Hz, for second order filter
 default_folder = "../gcode"
-show_plot = True
+show_plot = False
 alloc_block_size = 5000  # size of block allocation
 timestep: float = 1.0  # time between csv frames in ms
 ######### </CONFIG> #########
 
 
 class PathArray:
+    """An array of points, at a constant timestep for X,Y,Z, and E axes"""
+
     def __init__(self):
         self._steps: np.ndarray = np.zeros((1, 5))
         self._act_size = 0
@@ -84,6 +87,20 @@ def main() -> int:
         printer: GCode_parser = GCode_parser(2000)
         startTime: float = time.time()
         path = printer.parse_file(file_name)
+
+        pathArray = path.get()
+        # applying second order non-causal filter
+        x_lra = np.reshape(second_order_smooth(
+            pathArray[:, 1], cutoff_freq).T, [path.size(), 1])
+        y_lra = np.reshape(second_order_smooth(
+            pathArray[:, 2], cutoff_freq), [path.size(), 1])
+        pathArray = np.hstack([pathArray, x_lra, y_lra])
+        x_sra = (pathArray[:, 1] - pathArray[:, 5])
+        x_sra = x_sra[:, np.newaxis]
+        y_sra = (pathArray[:, 2] - pathArray[:, 6])
+        y_sra = y_sra[:, np.newaxis]
+        pathArray = np.hstack([pathArray, x_sra, y_sra])
+
         print("Parse time:", time.time()-startTime)
         print("Total lines:", np.size(path.size()))
 
@@ -105,11 +122,10 @@ def main() -> int:
             print(Prusa_output_name_override)
         out_filename = os.path.basename(file_name)
         out_filename = output_folder + \
-            os.path.splitext(out_filename)[0] + f"-{feedrate_override}"
+            os.path.splitext(out_filename)[0] + f"-{feedrate_override}mms-{cutoff_freq}Hz"
+        np.savetxt(out_filename+".csv", pathArray,
+                   delimiter=",", fmt='%.3f', header="time(ms), x-ref, y-ref, z, e(mm), xLRA, yLRA, xSRA, ySRA")
 
-        np.savetxt(out_filename+".csv", path.get(), delimiter=",",
-                   fmt='%.3f', header="time(ms), x, y, z, e(mm)")
-        
         size_str = size_as_str(os.path.getsize(out_filename+".csv"))
         print(f"saved to {out_filename}.csv")
 
@@ -118,6 +134,7 @@ def main() -> int:
             sidecar.write(f"Main File: {out_filename}.csv\n")
             sidecar.write(f"Main File Size: {size_str}\n")
             sidecar.write(f"Created: {timestamp}\n")
+            sidecar.write(f"2nd Order Cutoff Freq: {cutoff_freq}Hz\n")
             sidecar.write(f"Feedrate: {feedrate_override} mm/s\n")
             sidecar.write(f"        - {feedrate_override*60} mm/min\n")
             sidecar.write(f"Total path points: {path.size()}\n")
@@ -129,6 +146,31 @@ def main() -> int:
         print("save time:", time.time()-startTime)
 
     return 0
+
+
+def second_order_smooth(sequence, cutoff_freq):
+    """Cutoff Freq. in Hz"""
+    alpha = calc_smoothing(cutoff_freq, timestep*1000)  # Timestep is in ms
+    smoothed = exp_smooth(sequence, alpha)
+    # return smoothed
+    return np.flip(exp_smooth(np.flip(smoothed), alpha))
+
+
+def calc_smoothing(f_cutoff, f_sample) -> float:
+    """Calculate alpha, the exp. smoothing value for a rolling IIR filter.\n
+    Frequencies are in Hz"""
+    # Sources: https://www.dsprelated.com/showarticle/182.php, https://dsp.stackexchange.com/a/40465
+    x = 2*math.pi*f_cutoff/f_sample
+    return math.cos(x) - 1 + math.sqrt(math.pow(math.cos(x), 2) - 4*math.cos(x) + 3)
+
+
+def exp_smooth(sequence, alpha):
+    out = np.zeros(np.size(sequence))
+    # for i=0 case, will be overwritten
+    out[-1] = sequence[0]
+    for i, val in enumerate(sequence):
+        out[i] = (1-alpha)*out[i-1]+alpha*val
+    return out
 
 
 def inch_to_mm(val: float) -> float:
