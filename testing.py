@@ -28,8 +28,8 @@ yREF = data[:, 2]
 yLRA = data[:, 6]
 ySRA = data[:, 8]
 
-print(f"xSRA max{np.max(np.abs(xSRA))}")
-print(f"ySRA max{np.max(np.abs(ySRA))}")
+print(f"xSRA max: {np.max(np.abs(xSRA))}")
+print(f"ySRA max: {np.max(np.abs(ySRA))}")
 
 # Plotting columns
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))

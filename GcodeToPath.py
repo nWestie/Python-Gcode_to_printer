@@ -15,8 +15,8 @@ import os
 # GCode_filenames = ["../gcode/one-layer-E.gcode",]
 # GCode_filename = "./gcode/testing.gcode"
 output_folder = "../pathCSVs/"
-feedrate_override = 300  # in mm/s
-cutoff_freq = 10  # In Hz, for second order filter
+feedrate_override = 1000  # in mm/s
+cutoff_freq = 20  # In Hz, for second order filter
 default_folder = "../gcode"
 show_plot = False
 alloc_block_size = 5000  # size of block allocation
@@ -122,9 +122,10 @@ def main() -> int:
             print(Prusa_output_name_override)
         out_filename = os.path.basename(file_name)
         out_filename = output_folder + \
-            os.path.splitext(out_filename)[0] + f"-{feedrate_override}mms-{cutoff_freq}Hz"
+            os.path.splitext(out_filename)[
+                0] + f"-{feedrate_override}mms-{cutoff_freq}Hz"
         np.savetxt(out_filename+".csv", pathArray,
-                   delimiter=",", fmt='%.3f', header="time(ms), x-ref, y-ref, z, e(mm), xLRA, yLRA, xSRA, ySRA")
+                   delimiter=",", fmt='%.3f', header="t(ms), xRef, yRef, z, e, xLRA, yLRA, xSRA, ySRA")
 
         size_str = size_as_str(os.path.getsize(out_filename+".csv"))
         print(f"saved to {out_filename}.csv")
