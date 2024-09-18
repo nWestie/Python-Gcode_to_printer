@@ -340,4 +340,10 @@ def size_as_str(size_bytes: int) -> str:
 
 
 if __name__ == "__main__":
+    # feedrates = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400]
+    # feedrates = [405, 1300, 1400]
+    
+    # for feed in feedrates:
+    #     feedrate_override = feed
+    #     main()
     exit(main())
