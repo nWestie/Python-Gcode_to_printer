@@ -39,19 +39,19 @@ def plotFromFile():
 
     # Plotting columns
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
-    ax1.plot(time, xREF, linestyle='-', color='r')
-    ax1.plot(time, xLRA, linestyle='-', color='b')
-    ax1.plot(time, xSRA, linestyle='-', color='g')
+    ax1.plot(time, xREF, linestyle='-', marker='o',color='r')
+    # ax1.plot(time, xLRA, linestyle='-', color='b')
+    # ax1.plot(time, xSRA, linestyle='-', color='g')
     ax1.set_title('Filtered ')
     ax1.set_xlabel('time(s)')
     ax1.set_ylabel('x(mm)')
 
-    # ax2.plot(time, yREF, linestyle='-', color='r')
-    # ax2.plot(time, yLRA, linestyle='-', color='b')
-    # ax2.plot(time, ySRA, linestyle='-', color='g')
-    # ax2.set_title('Filtered ')
-    # ax2.set_xlabel('time(s)')
-    # ax2.set_ylabel('x(mm)')
+    ax2.plot(time, yREF, linestyle='-', color='r')
+    ax2.plot(time, yLRA, linestyle='-', color='b')
+    ax2.plot(time, ySRA, linestyle='-', color='g')
+    ax2.set_title('Filtered ')
+    ax2.set_xlabel('time(s)')
+    ax2.set_ylabel('x(mm)')
 
     plt.grid(True)
     plt.show()

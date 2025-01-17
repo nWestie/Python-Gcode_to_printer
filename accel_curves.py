@@ -2,6 +2,7 @@ import math
 import numpy as np
 from matplotlib import pyplot as plt
 import GcodeToPath
+from LivePlotting import LivePlot2D
 
 # constants
 hz = 1000/GcodeToPath.timestep  # sample rate (1/s)
@@ -73,21 +74,18 @@ def acc_spline(dist: float, vi: float, vf: float) -> tuple[np.ndarray, float]:
         return s_deacc-s_deacc[0], end_vel
 
 
+def _update(frame: int, slider):
+    accel, end_vel = acc_spline(
+        10, slider.val, 300)
+
+    # print(accel[-1])
+    # print(end_vel)
+    # print((accel[-1]-accel[-2])*hz)
+    length = len(accel)
+    t= np.arange(0, length/1000, 1/1000)
+    return np.vstack([t, accel]), (0,.05), (0,12)
+
+
 if __name__ == "__main__":
-    fig, ax = plt.subplots()
 
-    accel, end_vel = acc_spline(100, 1, 1)
-
-    print(accel[-1])
-    print(end_vel)
-    print((accel[-1]-accel[-2])*hz)
-    # traj1, end_vel = acc_spline(20, 4, 4)
-    # traj2, end_vel = acc_spline(20, 0, 0)
-    ax.grid()
-    ax.set_xlabel("sample")
-    ax.set_ylabel("pos")
-    ax.plot(accel, "r-")
-    # ax.plot(deacc, "g-")
-    # ax.plot(traj2, "b-")
-
-    plt.show()
+    LivePlot2D((100, 500), _update, 5, marker='o')

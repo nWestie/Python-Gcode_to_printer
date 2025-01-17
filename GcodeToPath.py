@@ -7,11 +7,10 @@ from tkinter.filedialog import askopenfilenames
 from matplotlib.widgets import Slider
 from functools import partial
 from typing import Optional
-from plotting import LivePlot3D
+from LivePlotting import LivePlot3D
 import time
 import os
 
-import accel_curves
 
 ######### <CONFIG> #########
 GCode_filenames = "../gcode/x-triwave-25mm.gcode",
@@ -29,6 +28,7 @@ corner_velocity = 300  # in mm/s
 
 ######### </CONFIG> #########
 
+import accel_curves # This must be down here to allow accel_curves to be run independantly (since it uses some config vars)
 
 class PathArray:
     """An array of points, at a constant timestep for X,Y,Z, and E axes"""
