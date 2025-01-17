@@ -11,9 +11,10 @@ from plotting import LivePlot3D
 import time
 import os
 
+import accel_curves
+
 ######### <CONFIG> #########
-# GCode_filenames = ["../gcode/one-layer-E.gcode",]
-# GCode_filename = "./gcode/testing.gcode"
+GCode_filenames = "../gcode/x-triwave-25mm.gcode",
 output_folder = "../pathCSVs/"
 feedrate_override = 1000  # in mm/s
 cutoff_freq = 20  # In Hz, for second order filter
@@ -21,6 +22,11 @@ default_folder = "../gcode"
 show_plot = False
 alloc_block_size = 5000  # size of block allocation
 timestep: float = 1.0  # time between csv frames in ms
+
+acceleration = 30000  # in mm/s^2
+max_velocity = 3000  # in mm/s
+corner_velocity = 300  # in mm/s
+
 ######### </CONFIG> #########
 
 
@@ -33,8 +39,11 @@ class PathArray:
         self._add_space()
 
     def append(self, new_steps: np.ndarray):
+        """Add rows to the PathArray: new_steps is a [N,4] array of the X, Y, Z and E positions"""
+        # Check that there is enough space to add new_steps
         if (self._act_size+len(new_steps) > len(self._steps)):
             self._add_space()
+        # Update length and append the steps
         new_size = self._act_size+len(new_steps)
         self._steps[self._act_size:new_size, 1:] = new_steps
         self._act_size = new_size
@@ -46,12 +55,14 @@ class PathArray:
         return self._steps[:self._act_size]
 
     def _add_space(self):
+        """Add additional rows to the PathArray. The time column is filled at this point as well."""
         next_time = self._steps[-1, 0] + timestep
         self._steps = np.vstack([self._steps, np.empty((alloc_block_size, 5))])
         self._steps[-alloc_block_size:,
                     0] = np.arange(next_time, next_time+timestep*alloc_block_size, timestep)
 
     def trim(self):
+        """Remove the blank, unfilled steps at the end of the list"""
         self._steps = self._steps[:self._act_size]
 
 
@@ -123,7 +134,7 @@ def main() -> int:
         out_filename = os.path.basename(file_name)
         out_filename = output_folder + \
             os.path.splitext(out_filename)[
-                0] + f"-{feedrate_override}mms-{cutoff_freq}Hz"
+                0] + f"-{corner_velocity}mms_min-{max_velocity}mms_max"
         np.savetxt(out_filename+".csv", pathArray,
                    delimiter=",", fmt='%.3f', header="t(ms), xRef, yRef, z, e, xLRA, yLRA, xSRA, ySRA")
 
@@ -136,8 +147,9 @@ def main() -> int:
             sidecar.write(f"Main File Size: {size_str}\n")
             sidecar.write(f"Created: {timestamp}\n")
             sidecar.write(f"2nd Order Cutoff Freq: {cutoff_freq}Hz\n")
-            sidecar.write(f"Feedrate: {feedrate_override} mm/s\n")
-            sidecar.write(f"        - {feedrate_override*60} mm/min\n")
+            sidecar.write(f"Corner Velocity: {corner_velocity} mm/s\n")
+            sidecar.write(f"Max Velocity: {max_velocity} mm/s\n")
+            sidecar.write(f"Acceleration: {acceleration} mm/s\n")
             sidecar.write(f"Total path points: {path.size()}\n")
             sidecar.write(f"Timestep: {timestep}ms\n")
             sidecar.write(f"Total Time: {timestep*path.size()/1000}s")
@@ -180,6 +192,8 @@ def inch_to_mm(val: float) -> float:
 
 class GCode_parser:
     def __init__(self, default_feedrate: float) -> None:
+        """Init a gcode parser with the specified default feedrate"""
+
         # Public path
         self.path: PathArray = PathArray()
 
@@ -187,8 +201,8 @@ class GCode_parser:
         self._relative_move: bool = False  # if movements are relative
         self._relative_e: bool = False  # if Extrusion is relative
         self._feedrate: float = default_feedrate
-        self._state: np.ndarray = np.zeros(4)
-        self._last_state: np.ndarray = np.zeros(4)
+        self._state: np.ndarray = np.zeros(4)  # X, Y, Z, and E positions
+        self._last_state: np.ndarray = np.zeros(4)  # Prev state
         # offsets used to ensure G92 zeroing can be handled.
         self.workspace_offsets: np.ndarray = np.zeros(4)
         self.unimplemented_cmds: dict[str, int] = {}
@@ -247,17 +261,32 @@ class GCode_parser:
 # Fan commands:        'M106', 'M107'
 # Homing: G28
 
-    def _generate_move_steps(self):
+    def _generate_move_steps(self) -> None:
         # dist/feedrate = time
-        travel = self._state[:3] - self._last_state[:3]
-        dist = np.linalg.norm(travel)
-        # Feedrate in mm/min, so convert from min->millisec
+        travel = self._state - self._last_state
+        # Euclydian distance of X and Y
+        dist = float(np.linalg.norm(travel[:2]))
+        angle = np.arctan2(travel[1], travel[0]) # get angle of path segment
+        z_dist = float(travel[2])
+        e_dist = float(travel[3])
+        # interpolate between the two positions,
+        # using acceleration and deceleration in X and Y
+        # TODO: End vel is not handled properly, should probably be stored and used to adjust next move
+        easing, end_vel = accel_curves.acc_spline(
+            dist, corner_velocity, corner_velocity)
+        norm_ease = easing/dist
+        # Note - lists are stacked then transposed to match the rest of the data
+        points = np.vstack((np.cos(angle)*easing, np.sin(angle)*easing,
+                           z_dist*norm_ease, e_dist*norm_ease)).T
+        
+        points = points + self._last_state
+        self.path.append(points)
+        return
+        # OLD - linear interpolation version
+        # Feedrate in mm/s, so convert from sec->millisec
         feed = feedrate_override
         travel_time = dist/feed*1000
         num_steps = int(np.ceil(travel_time/timestep))
-
-        # build array
-        # interpolate between the two positions
         self.path.append(np.linspace(
             self._last_state, self._state, num_steps, endpoint=False))
 
@@ -342,7 +371,7 @@ def size_as_str(size_bytes: int) -> str:
 if __name__ == "__main__":
     # feedrates = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400]
     # feedrates = [405, 1300, 1400]
-    
+
     # for feed in feedrates:
     #     feedrate_override = feed
     #     main()

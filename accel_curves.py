@@ -1,11 +1,12 @@
 import math
 import numpy as np
 from matplotlib import pyplot as plt
+import GcodeToPath
 
 # constants
-hz = 100  # sample rate (1/s)
-max_vel = 10  # in m/s
-acc: float = 2  # m/s^2
+hz = 1000/GcodeToPath.timestep  # sample rate (1/s)
+max_vel = GcodeToPath.max_velocity  # in mm/s
+acc: float = GcodeToPath.acceleration  # m/s^2
 
 time_til_max_vel = max_vel/acc
 time = np.arange(0, time_til_max_vel+1/hz, 1/hz)
@@ -49,9 +50,9 @@ def acc_spline(dist: float, vi: float, vf: float) -> tuple[np.ndarray, float]:
 
     if ct_overlap < min(len(s_acc), len(s_deacc)):
         # Accelerate/decelerate, but don't hit max_vel
-        print("acc/deacc")
         s_acc = s_acc[:-ct_overlap]
         s_deacc = s_deacc[ct_overlap:]
+        print(f"acc/deacc: max_vel = {vi+acc*len(s_acc)/hz}")
         return np.concatenate((s_acc, s_deacc)), vf
 
     if vf > vi:
@@ -71,29 +72,22 @@ def acc_spline(dist: float, vi: float, vf: float) -> tuple[np.ndarray, float]:
                               round(t_keep*hz)+1].copy()
         return s_deacc-s_deacc[0], end_vel
 
-    print("WARN: default return?")
-    return np.zeros((3)), 0
 
+if __name__ == "__main__":
+    fig, ax = plt.subplots()
 
-def decel_dist(vel: float, targ_vel: float) -> float:
-    """Distance needed to decelerate from the given velocity to the final"""
-    return -(targ_vel*targ_vel - vel*vel)/(2*acc)
+    accel, end_vel = acc_spline(100, 1, 1)
 
+    print(accel[-1])
+    print(end_vel)
+    print((accel[-1]-accel[-2])*hz)
+    # traj1, end_vel = acc_spline(20, 4, 4)
+    # traj2, end_vel = acc_spline(20, 0, 0)
+    ax.grid()
+    ax.set_xlabel("sample")
+    ax.set_ylabel("pos")
+    ax.plot(accel, "r-")
+    # ax.plot(deacc, "g-")
+    # ax.plot(traj2, "b-")
 
-fig, ax = plt.subplots()
-
-accel, end_vel = acc_spline(100, 1, 1)
-print(accel[-1])
-print(end_vel)
-print((accel[-1]-accel[-2])*hz)
-# traj1, end_vel = acc_spline(20, 4, 4)
-# traj2, end_vel = acc_spline(20, 0, 0)
-ax.grid()
-ax.set_xlabel("sample")
-ax.set_ylabel("pos")
-ax.plot(accel, "r-")
-# ax.plot(deacc, "g-")
-# ax.plot(traj2, "b-")
-
-
-plt.show()
+    plt.show()
