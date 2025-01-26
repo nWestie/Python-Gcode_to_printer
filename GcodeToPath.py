@@ -23,7 +23,7 @@ alloc_block_size = 5000  # size of block allocation
 timestep: float = 1.0  # time between csv frames in ms
 
 acceleration = 30000  # in mm/s^2
-max_velocity = 3000  # in mm/s
+max_velocity = 2000  # in mm/s
 corner_velocity = 300  # in mm/s
 
 ######### </CONFIG> #########

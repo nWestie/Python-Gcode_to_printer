@@ -84,8 +84,10 @@ class LivePlot2D:
         data, xb, yb = self._source_func(frame, self.slider)
         self._line.set_xdata(data[0])
         self._line.set_ydata(data[1])
-        self._ax.set_xlim(xb)
-        self._ax.set_ylim(yb)
+        if(xb):
+            self._ax.set_xlim(xb)
+        if(yb):
+            self._ax.set_ylim(yb)
         return self._line,
 
 
