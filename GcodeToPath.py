@@ -13,7 +13,7 @@ import os
 
 
 ######### <CONFIG> #########
-GCode_filenames = "../gcode/x-triwave-25mm.gcode",
+# GCode_filenames = "../gcode/x-triwave-150mm.gcode",
 output_folder = "../pathCSVs/"
 feedrate_override = 1000  # in mm/s
 cutoff_freq = 20  # In Hz, for second order filter
@@ -22,7 +22,7 @@ show_plot = False
 alloc_block_size = 5000  # size of block allocation
 timestep: float = 1.0  # time between csv frames in ms
 
-acceleration = 30000  # in mm/s^2
+acceleration = 40000  # in mm/s^2
 max_velocity = 2000  # in mm/s
 corner_velocity = 300  # in mm/s
 

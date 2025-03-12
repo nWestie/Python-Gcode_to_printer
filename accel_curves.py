@@ -39,7 +39,7 @@ def acc_spline(dist: float, vi: float, vf: float) -> tuple[np.ndarray, float]:
         t_acc = (act_vm-vi)/acc
         t_deacc = -(vf-act_vm)/acc
         tf = t_acc+t_deacc
-        ct = math.ceil(tf*hz)+1
+        ct = math.ceil(tf*hz) # + 1 # TODO: testing this
         # index of max velocity, where it switches from acc to deacc
         ct_vm = math.ceil(t_acc*hz)
         s_vec = np.arange(0, ct)/hz
@@ -56,7 +56,7 @@ def acc_spline(dist: float, vi: float, vf: float) -> tuple[np.ndarray, float]:
         def s_deacc(t): return dist + vf *(t) - .5*acc*np.power(t, 2)
 
         t_acc = (v_max-vi)/acc
-        ct_acc = math.ceil(t_acc*hz)+1
+        ct_acc = math.ceil(t_acc*hz)
         acc_vec = np.arange(0, ct_acc)/hz
         acc_vec = s_acc(acc_vec)
 

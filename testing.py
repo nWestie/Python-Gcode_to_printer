@@ -46,7 +46,7 @@ def plotFromFile():
     print("Data shape:", data.shape)
 
     # Extract columns
-    time = data[:, 0]
+    time = data[:, 0]/1000
     xREF = data[:, 1]
     xLRA = data[:, 5]
     xSRA = data[:, 7]
@@ -57,6 +57,7 @@ def plotFromFile():
     dt = time[1]-time[0]
 
     x_dot = np.diff(xREF)/dt
+    y_dot = np.diff(yREF)/dt
 
     print(f"xSRA max: {np.max(np.abs(xSRA))}")
     print(f"ySRA max: {np.max(np.abs(ySRA))}")
@@ -64,7 +65,7 @@ def plotFromFile():
     # Plotting columns
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
     ax1.plot(time, xREF, linestyle='-', marker='', color='g')
-    # ax1.plot(time, xLRA, linestyle='-', color='b')
+    ax1.plot(time, yREF, linestyle='-', color='b')
     # ax1.plot(time, xSRA, linestyle='-', color='g')
 
     ax1.set_title('X vs time ')
@@ -72,6 +73,7 @@ def plotFromFile():
     ax1.set_ylabel('x displacement(mm)')
 
     ax2.plot(time[:-1], x_dot, linestyle='-', color='g')
+    ax2.plot(time[:-1], y_dot, linestyle='-', color='b')
     # ax2.plot(time, yLRA, linestyle='-', color='b')
     # ax2.plot(time, ySRA, linestyle='-', color='g')
     ax2.set_title('Velocity ')
