@@ -8,11 +8,31 @@ import numpy as np
 from tkinter.filedialog import askopenfile
 from matplotlib import pyplot as plt
 import GcodeToPath
+from accel_curves import acc_spline
+from LivePlotting import LivePlot2D
 
 
 def main():
     plotFromFile()
+    # spline_gen()
 
+
+def spline_gen():
+    dt = GcodeToPath.timestep/1000
+    x, vf = acc_spline(500, 100, 100)
+    t = np.linspace(0,dt*len(x),len(x))
+    
+    x_dot = np.diff(x)/dt
+
+    print(f"vf = {vf}")
+    print(f"x_dot[-1] = {x_dot[-1]}")
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
+    ax1.plot(t, x, linestyle='-', marker='.', color='g')
+    ax2.plot(t[:-1], x_dot, linestyle='-', marker='.', color='g')
+
+    plt.grid(True)
+    plt.show()
 
 def plotFromFile():
     # Select and load the CSV file
@@ -34,24 +54,29 @@ def plotFromFile():
     yLRA = data[:, 6]
     ySRA = data[:, 8]
 
+    dt = time[1]-time[0]
+
+    x_dot = np.diff(xREF)/dt
+
     print(f"xSRA max: {np.max(np.abs(xSRA))}")
     print(f"ySRA max: {np.max(np.abs(ySRA))}")
 
     # Plotting columns
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
-    ax1.plot(time, xREF, linestyle='-', marker='o',color='r')
+    ax1.plot(time, xREF, linestyle='-', marker='', color='g')
     # ax1.plot(time, xLRA, linestyle='-', color='b')
     # ax1.plot(time, xSRA, linestyle='-', color='g')
-    ax1.set_title('Filtered ')
-    ax1.set_xlabel('time(s)')
-    ax1.set_ylabel('x(mm)')
 
-    ax2.plot(time, yREF, linestyle='-', color='r')
-    ax2.plot(time, yLRA, linestyle='-', color='b')
-    ax2.plot(time, ySRA, linestyle='-', color='g')
-    ax2.set_title('Filtered ')
+    ax1.set_title('X vs time ')
+    ax1.set_xlabel('time(s)')
+    ax1.set_ylabel('x displacement(mm)')
+
+    ax2.plot(time[:-1], x_dot, linestyle='-', color='g')
+    # ax2.plot(time, yLRA, linestyle='-', color='b')
+    # ax2.plot(time, ySRA, linestyle='-', color='g')
+    ax2.set_title('Velocity ')
     ax2.set_xlabel('time(s)')
-    ax2.set_ylabel('x(mm)')
+    ax2.set_ylabel('velocity')
 
     plt.grid(True)
     plt.show()
